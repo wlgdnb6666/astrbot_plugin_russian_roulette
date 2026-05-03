@@ -3,7 +3,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import *
 
-@register("russian_roulette", "青禾遇海", "俄罗斯转盘决斗插件", "1.1.3")
+@register("russian_roulette", "青禾遇海", "俄罗斯转盘决斗插件", "1.1.4")
 class RussianRoulettePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -126,7 +126,7 @@ class RussianRoulettePlugin(Star):
         current = await self.get_kv_data(key, 0)
         await self.put_kv_data(key, current + 1)
 
-    @filter.command("俄罗斯转盘")
+    @filter.command("决斗")
     async def challenge(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         if not group_id:
