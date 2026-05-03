@@ -3,7 +3,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import *
 
-@register("russian_roulette", "YourName", "俄罗斯转盘决斗插件", "1.1.0")
+@register("russian_roulette", "YourName", "俄罗斯转盘决斗插件", "1.1.1")
 class RussianRoulettePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -40,8 +40,9 @@ class RussianRoulettePlugin(Star):
             yield event.plain_result("❓ 请 @ 一位你想挑战的对象。")
             return
         
-        target_qq = mentions[0]
-        challenger_qq = event.get_sender_id()
+        # 统一转为字符串处理，防止 int 与 str 匹配失败
+        target_qq = str(mentions[0])
+        challenger_qq = str(event.get_sender_id())
 
         if target_qq == challenger_qq:
             yield event.plain_result("🤕 你不能挑战你自己。")
@@ -63,8 +64,10 @@ class RussianRoulettePlugin(Star):
     async def accept(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         game = self.get_game(group_id)
+        sender_id = str(event.get_sender_id())
         
-        if game["status"] == 1 and event.get_sender_id() == game["b"]:
+        # 校验：状态为准备中，且发送者是被挑战者
+        if game["status"] == 1 and sender_id == str(game["b"]):
             game["status"] = 2
             game["turn"] = game["a"] # 挑战者先开枪
             yield event.plain_result("🔫 决斗开始！由挑战者先开枪。请双方轮流发送【/开枪】")
@@ -75,50 +78,53 @@ class RussianRoulettePlugin(Star):
     async def decline(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         game = self.get_game(group_id)
-        if game["status"] == 1 and event.get_sender_id() == game["b"]:
+        sender_id = str(event.get_sender_id())
+
+        if game["status"] == 1 and sender_id == str(game["b"]):
             self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
-            yield event.plain_result("🏳️ 对方拒绝了你的挑战。")
+            yield event.plain_result("🏳️ 对方拒绝了你的挑战，决斗取消。")
 
     @filter.command("开枪")
     async def fire(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         game = self.get_game(group_id)
-        curr_user = event.get_sender_id()
+        curr_user = str(event.get_sender_id())
 
         if game["status"] != 2: return
-        if curr_user != game["turn"]:
+        if curr_user != str(game["turn"]):
             yield event.plain_result("💢 还没到你的回合，不要抢火！")
             return
 
         game["bullets_fired"] += 1
         fired_count = game["bullets_fired"]
         
-        # 核心逻辑移植：随次数增加概率，第6枪必响
         is_dead = False
-        if fired_count >= 6:
+        if fired_count >= 6: # 第6枪必响
             is_dead = True
         else:
-            # 模仿源码 q:$随机数 1-[6-%枪%]$，如果 q==1 则中弹
+            # 模拟 QRSpeed 逻辑：q:$随机数 1-[6-%枪%]$
+            # 随着已开枪数增加，范围缩小，概率变大
             chance_range = 6 - (fired_count - 1)
             if random.randint(1, chance_range) == 1:
                 is_dead = True
 
         if is_dead:
-            winner = game["b"] if curr_user == game["a"] else game["a"]
+            winner = str(game["b"]) if curr_user == str(game["a"]) else str(game["a"])
             loser = curr_user
             await self.update_score(winner, True)
             await self.update_score(loser, False)
             
+            # 清空该群游戏状态
             self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
             yield event.plain_result(f"💥 “砰！”枪响了...\n{event.get_sender_name()} 倒在了血泊中。决斗结束！")
         else:
             # 切换回合
-            game["turn"] = game["b"] if curr_user == game["a"] else game["a"]
+            game["turn"] = game["b"] if curr_user == str(game["a"]) else game["a"]
             yield event.plain_result(f"☁️ “咔嚓...”是空枪。你捡回一条命。轮到对方了。\n(当前已试探 {fired_count}/6 次)")
 
     @filter.command("我的战绩")
     async def my_stats(self, event: AstrMessageEvent):
-        user_id = event.get_sender_id()
+        user_id = str(event.get_sender_id())
         wins = await self.get_kv_data(f"win_{user_id}", 0)
         losses = await self.get_kv_data(f"loss_{user_id}", 0)
         total = wins + losses
@@ -130,4 +136,4 @@ class RussianRoulettePlugin(Star):
         group_id = event.message_obj.group_id
         if group_id in self.games:
             self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
-            yield event.plain_result("🛑 决斗已由管理员或系统强制终止。")
+            yield event.plain_result("🛑 决斗已重置。")
