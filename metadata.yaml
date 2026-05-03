@@ -2,6 +2,6 @@ name: russian_roulette
 display_name: 俄罗斯转盘
 description: 基于 QRSpeed 逻辑移植的俄罗斯转盘决斗游戏。支持胜场统计。
 author: 青禾遇海
-version: 1.1.1
+version: 1.1.2
 repo: https://github.com/YourName/astrbot_plugin_russian_roulette
 astrbot_version: ">=4.9.2"
