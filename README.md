@@ -1,0 +1,2 @@
+# astrbot_plugin_russian_roulette
+一个基于astrbot的俄罗斯钻盘赌游戏
