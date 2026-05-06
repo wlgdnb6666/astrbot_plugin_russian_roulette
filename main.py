@@ -3,7 +3,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import *
 
-@register("russian_roulette", "青禾遇海", "俄罗斯转盘决斗插件", "1.1.4")
+@register("russian_roulette", "青禾遇海", "俄罗斯转盘决斗插件", "1.1.5")
 class RussianRoulettePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
