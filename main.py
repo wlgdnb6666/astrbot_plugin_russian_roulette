@@ -3,13 +3,13 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import *
 
-@register("russian_roulette", "青禾遇海", "俄罗斯转盘决斗插件", "1.1.5")
+@register("russian_roulette", "YourName", "俄罗斯转盘决斗插件", "1.2.1")
 class RussianRoulettePlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.games = {}
         
-        # --- 随机文案库 (已整合青禾遇海提供的100条文案) ---
+        # --- 整合青禾遇海提供的 100 条文案库 ---
         self.MISS_MESSAGES = [
             "☁️ “咔哒——” 死神在门外抽了根烟，决定再等等。",
             "☁️ 弹巢转了一圈，子弹在隔壁格子里打了个盹。",
@@ -118,7 +118,7 @@ class RussianRoulettePlugin(Star):
 
     def get_game(self, group_id):
         if group_id not in self.games:
-            self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
+            self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None, "mode": "normal"}
         return self.games[group_id]
 
     async def update_score(self, user_id, is_win=True):
@@ -138,51 +138,67 @@ class RussianRoulettePlugin(Star):
             yield event.plain_result("⚠️ 当前群聊已有正在进行的决斗。")
             return
 
+        # 识别模式
+        mode = "normal"
+        if "双弹" in event.message_str: mode = "double"
+        elif "自杀" in event.message_str: mode = "suicide"
+
+        challenger_qq = str(event.get_sender_id())
+        
+        if mode == "suicide":
+            game.update({"status": 2, "a": challenger_qq, "b": "SYSTEM", "turn": challenger_qq, "mode": "suicide", "bullets_fired": 0})
+            yield event.plain_result("💀 你开启了【自杀模式】。没人会阻止你，请发送【/开枪】。")
+            return
+
         mentions = [at.qq for at in event.message_obj.message if isinstance(at, At)]
         if not mentions:
-            yield event.plain_result("❓ 请 @ 一位你想挑战的对象。")
+            yield event.plain_result("❓ 请 @ 一位对手，或输入【/决斗 自杀】。")
             return
         
         target_qq = str(mentions[0])
-        challenger_qq = str(event.get_sender_id())
-
         if target_qq == challenger_qq:
-            yield event.plain_result("🤕 你不能挑战你自己。")
+            yield event.plain_result("🤕 想自杀请使用【/决斗 自杀】。")
             return
 
-        game.update({
-            "status": 1,
-            "a": challenger_qq,
-            "b": target_qq,
-            "bullets_fired": 0
-        })
-        
+        game.update({"status": 1, "a": challenger_qq, "b": target_qq, "bullets_fired": 0, "mode": mode})
+        mode_desc = "【双弹模式】" if mode == "double" else "【普通模式】"
         yield event.chain_result([
             At(qq=target_qq),
-            Plain(f" 用户 {event.get_sender_name()} 向你发起挑战！\n回复【/接受决斗】开始，或回复【/拒绝决斗】。")
+            Plain(f" 用户 {event.get_sender_name()} 向你发起 {mode_desc} 决斗！\n回复【/接受决斗】或【/拒绝决斗】。")
         ])
+        return
 
     @filter.command("接受决斗")
     async def accept(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         game = self.get_game(group_id)
-        sender_id = str(event.get_sender_id())
-        
-        if game["status"] == 1 and sender_id == str(game["b"]):
+        if game["status"] == 1 and str(event.get_sender_id()) == str(game["b"]):
             game["status"] = 2
             game["turn"] = game["a"]
-            yield event.plain_result("🔫 决斗开始！由挑战者先开枪。请双方轮流发送【/开枪】")
-        elif game["status"] == 1:
-            yield event.plain_result("🚫 只有被挑战者才能接受决斗。")
+            yield event.plain_result("🔫 决斗开始！请双方轮流发送【/开枪】。")
+        return
 
     @filter.command("拒绝决斗")
     async def decline(self, event: AstrMessageEvent):
         group_id = event.message_obj.group_id
         game = self.get_game(group_id)
-        sender_id = str(event.get_sender_id())
-        if game["status"] == 1 and sender_id == str(game["b"]):
-            self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
-            yield event.plain_result("🏳️ 对方拒绝了你的挑战，决斗取消。")
+        if game["status"] == 1 and str(event.get_sender_id()) == str(game["b"]):
+            self.games[group_id] = {"status": 0}
+            yield event.plain_result("🏳️ 对方拒绝了你的挑战。")
+        return
+
+    @filter.command("认输")
+    async def give_up(self, event: AstrMessageEvent):
+        group_id = event.message_obj.group_id
+        game = self.get_game(group_id)
+        curr_user = str(event.get_sender_id())
+        if game["status"] == 2 and curr_user in [game["a"], game["b"]]:
+            winner_id = game["b"] if curr_user == game["a"] else game["a"]
+            await self.update_score(winner_id, True)
+            await self.update_score(curr_user, False)
+            self.games[group_id] = {"status": 0}
+            yield event.plain_result(f"🏳️ {event.get_sender_name()} 认输了，这并不丢人，只是活着比较重要。")
+        return
 
     @filter.command("开枪")
     async def fire(self, event: AstrMessageEvent):
@@ -190,50 +206,50 @@ class RussianRoulettePlugin(Star):
         game = self.get_game(group_id)
         curr_user = str(event.get_sender_id())
 
-        if game["status"] != 2: return
-        if curr_user != str(game["turn"]):
-            yield event.plain_result("💢 还没到你的回合，不要抢火！")
-            return
+        if game["status"] != 2 or curr_user != str(game["turn"]): return
 
         game["bullets_fired"] += 1
-        fired_count = game["bullets_fired"]
+        cnt = game["bullets_fired"]
+        bullets_in_chamber = 2 if game["mode"] == "double" else 1
+        
+        # 概率计算
+        remaining_slots = 7 - cnt
+        current_prob = (bullets_in_chamber / remaining_slots * 100) if remaining_slots > 0 else 100.0
         
         is_dead = False
-        if fired_count >= 6:
+        if random.randint(1, remaining_slots + 1) <= bullets_in_chamber:
             is_dead = True
-        else:
-            chance_range = 6 - (fired_count - 1)
-            if random.randint(1, chance_range) == 1:
-                is_dead = True
 
         if is_dead:
-            winner = str(game["b"]) if curr_user == str(game["a"]) else str(game["a"])
-            loser = curr_user
-            await self.update_score(winner, True)
-            await self.update_score(loser, False)
-            
-            self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
-            
-            msg = random.choice(self.HIT_MESSAGES)
-            yield event.plain_result(f"{msg}\n{event.get_sender_name()} 倒下了。决斗结束！")
+            if game["mode"] != "suicide":
+                winner_id = game["b"] if curr_user == game["a"] else game["a"]
+                await self.update_score(winner_id, True)
+            await self.update_score(curr_user, False)
+            self.games[group_id] = {"status": 0}
+            yield event.plain_result(f"{random.choice(self.HIT_MESSAGES)}\n{event.get_sender_name()} 倒下了。")
         else:
-            game["turn"] = game["b"] if curr_user == str(game["a"]) else game["a"]
+            # 计算下一发的概率展示给用户
+            next_slots = 7 - (cnt + 1)
+            next_prob = (bullets_in_chamber / next_slots * 100) if next_slots > 0 else 100.0
             
-            msg = random.choice(self.MISS_MESSAGES)
-            yield event.plain_result(f"{msg}\n(当前已试探 {fired_count}/6 次)")
+            if game["mode"] != "suicide":
+                game["turn"] = game["b"] if curr_user == game["a"] else game["a"]
+            
+            yield event.plain_result(f"{random.choice(self.MISS_MESSAGES)}\n(当前命中概率：{current_prob:.1f}% | 下一发：{next_prob:.1f}%)")
+        return
 
     @filter.command("我的战绩")
     async def my_stats(self, event: AstrMessageEvent):
-        user_id = str(event.get_sender_id())
-        wins = await self.get_kv_data(f"win_{user_id}", 0)
-        losses = await self.get_kv_data(f"loss_{user_id}", 0)
-        total = wins + losses
-        rate = (wins / total * 100) if total > 0 else 0
-        yield event.plain_result(f"📊 【转盘战绩】\n用户：{event.get_sender_name()}\n胜场：{wins}\n败场：{losses}\n胜率：{rate:.1f}%")
+        uid = str(event.get_sender_id())
+        w = await self.get_kv_data(f"win_{uid}", 0)
+        l = await self.get_kv_data(f"loss_{uid}", 0)
+        total = w + l
+        rate = (w / total * 100) if total > 0 else 0
+        yield event.plain_result(f"📊 【个人战绩】\n用户：{event.get_sender_name()}\n胜场：{w}\n败场：{l}\n胜率：{rate:.1f}%")
+        return
 
     @filter.command("终止决斗")
     async def stop_game(self, event: AstrMessageEvent):
-        group_id = event.message_obj.group_id
-        if group_id in self.games:
-            self.games[group_id] = {"status": 0, "bullets_fired": 0, "a": None, "b": None, "turn": None}
-            yield event.plain_result("🛑 决斗已重置。")
+        self.games[event.message_obj.group_id] = {"status": 0}
+        yield event.plain_result("🛑 决斗已重置。")
+        return
